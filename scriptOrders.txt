@@ -152,15 +152,15 @@ where ORDER_TIME >='11/26/2016 12:00:00 AM'  //since wave 1 go live
 // and
 // num(ORDER_TIME) >= num($(vThreeYearsPrior)) //may use this in the future
 and
-(isnull(FUTURE_OR_STAND)  //child and normal orders will be null
+((isnull(FUTURE_OR_STAND)  //child and normal orders will be null
 or
 FUTURE_OR_STAND = 'F') //future orders
+or (FUTURE_OR_STAND = 'S' and STAND_INTERVAL = 'PRN'))
 and
-ORDER_TYPE_C <> '10'  //EXCLUDE NURSING ORDERS
-AND
-ORDER_TYPE_C <> '12' //Exclude Consults 
-and
-NOT WILDMATCH (PROC_CODE, 'ADT*')  ;	 //EXCLUDE ADT ORDERS
+ORDER_TYPE_C = '10';  //ONLY NURSING ORDERS
+
+// and
+// NOT WILDMATCH (PROC_CODE, 'ADT*')  ;	 //EXCLUDE ADT ORDERS
 // we want to exclude parent orders (parent to child order is at least a 1:1), only include child orders, future, and normal (also null in this field) to ensure the count is accurate
 
 
@@ -201,7 +201,7 @@ FROM [lib://Extracts_Clarity_PROD/CLARITY_ORDER_PROC.qvd]
 Left Join([Order Procedures])
 LOAD
     ORDER_PROC_ID 																													  AS PARENT_ORDER,  //Links back to parent order
-    if(len(trim(PAT_LOC_ID))>0, ApplyMap('CLARITY_DEP_MAP', PAT_LOC_ID)  & ' [' & PAT_LOC_ID & ']')								      AS [Patient Location1]
+    if(len(trim(PAT_LOC_ID))>0, ApplyMap('CLARITY_DEP_MAP', PAT_LOC_ID)  & ' [' & PAT_LOC_ID & ']')								      AS [Patient Location]
 FROM [lib://Extracts_Clarity_PROD/CLARITY_ORDER_PROC_2.qvd]
 (qvd);
 
@@ -209,7 +209,7 @@ FROM [lib://Extracts_Clarity_PROD/CLARITY_ORDER_PROC_2.qvd]
 Left Join([Order Procedures])
 LOAD
     ORDER_PROC_ID 																													  AS %ORDER_ID,		//links back to future or normal order
-    if(len(trim(PAT_LOC_ID))>0, ApplyMap('CLARITY_DEP_MAP', PAT_LOC_ID)  & ' [' & PAT_LOC_ID & ']')								      AS [Future Orders -Pat Loc]
+    if(len(trim(PAT_LOC_ID))>0, ApplyMap('CLARITY_DEP_MAP', PAT_LOC_ID)  & ' [' & PAT_LOC_ID & ']')								      AS [Patient Location]//[Future Orders -Pat Loc]
 FROM [lib://Extracts_Clarity_PROD/CLARITY_ORDER_PROC_2.qvd]
 (qvd);
 
@@ -335,9 +335,7 @@ where ORDER_DTTM > '11/26/2016 12:00:00 AM'
 and
 exists (PARENT_ORDER, ORDER_ID)
 and 
-ORDER_TYPE_C <> '999' //medications
-and
-ORDER_TYPE_C <> '10'; //nursing orders
+ORDER_TYPE_C = '10'; //nursing orders
 
 //left join next on order_id to include info on future or normal orders that exists in first table
 left join ([Order Procedures])
@@ -358,9 +356,7 @@ where ORDER_DTTM > '11/26/2016 12:00:00 AM'
 and
 exists (PARENT_ORDER, ORDER_ID)
 and 
-ORDER_TYPE_C <> '999' //medications
-and
-ORDER_TYPE_C <> '10'; //nursing orders
+ORDER_TYPE_C = '10'; //nursing orders
 
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -413,15 +409,13 @@ LOAD
 FROM [lib://Extracts_Clarity_PROD/CLARITY_HV_ORDER_PROC.qvd]
 (qvd);
 
-
 left join ([Order Procedures])
 LOAD
     %ORDER_ID,
-    if(isnull([%Ordering Prov]),  [Ordering Prov1],  [%Ordering Prov]) as "Ordering Prov",
-    if (isnull ([Patient Location1]), [Future Orders -Pat Loc], [Patient Location1]) as [Patient Location]
+    if(isnull([%Ordering Prov]),  [Ordering Prov1],  [%Ordering Prov]) as "Ordering Prov"
 Resident [Order Procedures];
 
-drop fields [Ordering Prov1], [Patient Location1], [Future Orders -Pat Loc] from [Order Procedures];
+drop field [Ordering Prov1] from [Order Procedures];
 
 left join ([Order Procedures])
 LOAD
@@ -482,201 +476,29 @@ FROM [lib://Extracts_Clarity_PROD/CLARITY_ABN_NOTES.qvd]
 ////////////////////////////////////////////////////////
 
 
-///$tab Order_Med_New
-[Order Medications]: //one line per medication order
-NoConcatenate
-LOAD
-    ORDER_MED_ID																												    AS %ORDER_ID,
-        
-   	1																			    								    			AS MedFlag,
-
-	ORDER_CLASS_C, 																													
-    ORDER_CLASS_C_NAME																												AS [Order Class], 																							
-    
-    ORDER_PRIORITY_C,
-    ORDER_PRIORITY_C_NAME																											AS [Order Priority],
-   	START_DATE,
-    END_DATE,
-    ORDERING_MODE_C,
-    ORDERING_MODE_C_NAME																											AS [Ordering Mode],
-    DATE(FLOOR(ORDERING_DATE))                                                                                                      AS ORDERING_DATE,
-    HV_DISCR_FREQ_ID																												AS %FREQ_ID,
-    MEDICATION_ID,
-    PAT_ID																															AS [Patient ID],
-    PAT_ENC_CSN_ID,
-    AUTHRZING_PROV_ID    																											AS 'Authorizing Provider ID',
-    if(len(trim(AUTHRZING_PROV_ID)>0), ApplyMap('CLARITY_SER_MAP', AUTHRZING_PROV_ID)  & ' [' & AUTHRZING_PROV_ID & ']')			AS [Authorizing Provider],
-    ORD_PROV_ID																														AS 'Ordering Provider ID',
-    if(len(trim(ORD_PROV_ID)>0), ApplyMap('CLARITY_SER_MAP', ORD_PROV_ID)  & ' [' & ORD_PROV_ID & ']')			        			AS [Ordering Prov],
-    PAT_LOC_ID, //Patient location at time of signing
-    if(len(trim(PAT_LOC_ID))>0, ApplyMap('CLARITY_DEP_MAP', PAT_LOC_ID)  & ' [' & PAT_LOC_ID & ']')							   		AS [Patient Location],
-    PHARMACY_ID,
-    PHARMACY_NAME       as [Pharmacy Associated with Order],
-    RSN_FOR_DISCON_C,
-    RSN_FOR_DISCON_C_NAME   as "Medication DC Reason"
-
-FROM [lib://Extracts_Clarity_PROD/CLARITY_ORDER_MED.qvd]
-(qvd)
-where ORDERING_DATE >='11/26/2016 12:00:00 AM';
-// and
-// num(ORDERING_DATE) >= num($(vThreeYearsPrior));  //may use this to limit in the future
-
-
-left join
-[Order Medications]: 
-LOAD
-    ORDER_ID   																													as %ORDER_ID,
-    ORDERING_USER_ID,
-    if(len(trim(ORDERING_USER_ID)>0),ApplyMap('CLARITY_EMP_MAP', ORDERING_USER_ID)  & ' [' & ORDERING_USER_ID & ']')			AS [Ordering User],
-    DISPLAY_NAME,
-    ORDER_STATUS_C_NAME																											as [Order Status Name],
-    PAT_ENC_CSN_ID &'-'& ORDER_DTTM &'-'& PRL_ORDERSET_ID																		as Orderset_patenc_key,//used to count distinct times ordersets were accessed for each patient
-	ACTIVE_ORDER_C_NAME, 
-    ORDER_TYPE_C_NAME																											AS [Order Type], 
-    PAT_LOC_ID
-FROM [lib://Extracts_Clarity_PROD/CLARITY_ORDER_METRICS.qvd]
-(qvd)
-where ORDER_DTTM > '11/26/2016 12:00:00 AM'
-and
-exists (%ORDER_ID, ORDER_ID)
-and 
-ORDER_TYPE_C = '999';//medications
-
-left join 
-([Order Medications])
-LOAD
-    ORDER_ID  																													as %ORDER_ID,
-    1																															as smartset_flag,
-    SS_PRL_ID																													AS [Order Set ID],		//Id of smartset that order came from
-    ORDERSET_START_DATE
-FROM [lib://Extracts_Clarity_PROD/CLARITY_ORDER_SMARTSET.qvd] 	//containts data on smartsets that orders originated from
-(qvd)
-where exists (%ORDER_ID, ORDER_ID);
-
-left join ([Order Medications])
-LOAD
-    PROTOCOL_ID																													AS [Order Set ID],
-    DISPLAY_NAME																												as [Orderset Name], 
-    VERSION_STATUS_C
-FROM [lib://Extracts_Clarity_PROD/CLARITY_CL_PRL_SS_OT.qvd] //Contains specific settings and details for orderset
-(qvd)
-where
-VERSION_STATUS_C = '1';  //1 = released;
-
-
-
-left join ([Order Medications])
-LOAD
-    ORDER_MED_ID 																												as %ORDER_ID,
-    DISPENSABLE_MED_ID     																										as dispense_id
-FROM [lib://Extracts_Clarity_PROD/CLARITY_ORDER_MEDINFO.qvd]   //bridge table to get us from order to medication id
-(qvd);
-
-left join ([Order Medications])  
-LOAD
-    MEDICATION_ID				   																								as dispense_id,
-    RECORD_STATE_C
-FROM [lib://Extracts_Clarity_PROD/CLARITY_RX_MED_ONE_TWO_THREE.qvd]
-(qvd)
-Where
-len(trim(RECORD_STATE_C))<= 0 ;
-// 0 =ACTIVE
-
-LEFT JOIN([Order Medications])
-LOAD
-    MEDICATION_ID					    																						as dispense_id,
-    NAME																														AS MEDICATION_NAME,
-    NAME & ' [' & MEDICATION_ID & ']'																							AS [Medication Name],
-    PHARM_CLASS_C_NAME																											AS [Pharmacy Class],
-    PHARM_SUBCLASS_C,
-    PHARM_SUBCLASS_C_NAME
-    //PHARM_SUBCLASS_C_TITLE
-    //RECORD_STATE - Deprecated Column
-FROM [lib://Extracts_Clarity_PROD/CLARITY_CLARITY_MEDICATION.qvd]
-(qvd);
-
-
-left join
-([Order Medications])
-LOAD
-	ORDER_ID 																													as %ORDER_ID,
-    ORDER_TIME																													AS [Order Time],	                 // leaving dimension as order_time to have one master dimension for all proc orders (child) and all med orders
-    ORDER_TIME																													AS PARENT_ORDER_CREATION_TIME		//when counting distinct times orderset was accessed and utilized, counting orderIid - parent order time (for procedures)- and orderset_id.  Aliasing this field same as parent order creation for proc to concact and count from KPI																										
-FROM [lib://Extracts_Clarity_PROD/CLARITY_ORDER_MED_3.qvd]
-(qvd);	 
-
-left join
-([Order Medications])
-LOAD
-    FREQ_ID						AS %FREQ_ID,
-    FREQ_NAME					AS FREQUENCY
-    //PRN_YN
-FROM [lib://Extracts_Clarity_PROD/CLARITY_IP_FREQUENCY.qvd]
-(qvd);
-
-left join
-([Order Medications])
-LOAD
-    ORDER_ID					AS %ORDER_ID,
-    IP_STANDING_COUNT			AS Duration_1,
-    IP_STAND_CNT_TYPE_C,
-    STND_TP_C_NAME				AS Duration_2		
-FROM [lib://Extracts_Clarity_PROD/CLARITY_X_ORDER_MED_STDCNT.qvd]
-(qvd);
-
-//frequency and duration are not required fields in order entry
-
-///////////////////////////////////////////////////////bring in associated dx
-ASSOCIATED_DX:
-LOAD
-    ORDER_MED_ID																													  AS %ORDER_ID,
-    DX_ID AS %DX_ID																															  
-FROM [lib://Extracts_Clarity_PROD/CLARITY_ORDER_DX_MED.qvd]
-(qvd);
-
-LEFT JOIN (ASSOCIATED_DX)
-LOAD
-    DX_ID AS %DX_ID,
-    DX_NAME
-FROM [lib://Extracts_Clarity_PROD/CLARITY_CLARITY_EDG.qvd]
-(qvd);
-
-
-Associated_DX2:
-LOAD
-[%ORDER_ID],
-CONCAT(DX_NAME, ', ') as "Associated DX on Order"
-Resident
-ASSOCIATED_DX
-group by 
-[%ORDER_ID];
-
-drop table ASSOCIATED_DX;
-
-left join
-([Order Medications])
-Load
-[%ORDER_ID],
-"Associated DX on Order"
-resident Associated_DX2;
-
-drop table Associated_DX2;
-
-
-
-
 ///$tab Concatenation & DROP & Left Join
-Concatenate([Order Procedures])
-Load * 
-Resident [Order Medications];
+// Concatenate([Order Procedures])
+// Load * 
+// Resident [Order Medications];
 
-DROP TABLE [Order Medications];
+// DROP TABLE [Order Medications];
 
 Rename Table [Order Procedures] to [Orders];
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 //Join to concatenated med and proc orders table
+
+Left Join([Orders])
+LOAD
+    PAT_ID									AS [Patient ID],
+    PAT_NAME,
+    PAT_MRN_ID,
+    BIRTH_DATE								AS [DOB],
+    SSN
+    
+FROM [lib://Extracts_Clarity_PROD/CLARITY_PATIENT.qvd]
+(qvd);
 
 Left Join([Orders])
 LOAD
@@ -705,16 +527,16 @@ FROM [lib://Extracts_Clarity_PROD/CLARITY_PAT_ENC_HSP.qvd]
 
 
 
-Left Join([Orders])
-LOAD
-    PAT_ID									AS [Patient ID],
-    PAT_NAME,
-    PAT_MRN_ID,
-    BIRTH_DATE								AS [DOB],
-    SSN
+// Left Join([Orders])
+// LOAD
+//     PAT_ID									AS [Patient ID],
+//     PAT_NAME,
+//     PAT_MRN_ID,
+//     BIRTH_DATE								AS [DOB],
+//     SSN
     
-FROM [lib://Extracts_Clarity_PROD/CLARITY_PATIENT.qvd]
-(qvd);
+// FROM [lib://Extracts_Clarity_PROD/CLARITY_PATIENT.qvd]
+// (qvd);
 
 //Note - this is hospital encounters only (inpatient and outpatient) - nulls when linking this to the app occur if they are are pb not hb
 Left Join ([Orders])
